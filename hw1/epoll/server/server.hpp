@@ -55,6 +55,7 @@ public:
                 FD_CLR(listener, &available);
                 clients.insert(new_client);
                 // allocate new buffer
+                w_buf[new_client] = stringstream();
                 r_buf[new_client] = stringstream();
                 handle_new_connection(new_client);
             }
@@ -74,6 +75,7 @@ public:
                         handle_disconnect(client);
                         // remove client from set, remove r/w buffer
                         clients.erase(client);
+                        w_buf.erase(client);
                         r_buf.erase(client);
                         FD_CLR(client, &all_fds);
                         FD_CLR(client, &available);
@@ -83,6 +85,15 @@ public:
                         if(debug)printf("handle client %d\n", client);
                         handle_client(client);
                     }
+                }
+            }
+            if(debug)printf("write to all clients\n");
+            for(auto& client: clients){
+                if(FD_ISSET(client, &available) || client == new_client){
+                    write(client, w_buf[client].str().c_str(), w_buf[client].str().length());
+                    // clear write buffer
+                    w_buf[client].str("");
+                    w_buf[client].clear();
                 }
             }
             if(debug)printf("finish select cycle\n");
@@ -99,6 +110,7 @@ protected:
     int max_fd;
     set<int> clients;
     char buffer[BUFFER_SIZE];
+    map<int, stringstream> w_buf;
     map<int, stringstream> r_buf;
 
     int create_socket(int port){
