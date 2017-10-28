@@ -17,13 +17,13 @@ using namespace std;
 
 #define BUFFER_SIZE 1024
 
-class GenericSelectServer{
+class Server{
 public:
     bool debug;
     // callbacks
-    ~GenericSelectServer() = default;
-    GenericSelectServer(const int port, const int max_connection=10, bool debug=true) : 
-                        port(port), listener(0), backlog(max_connection), debug(debug){ 
+    ~Server() = default;
+    Server(const int port, const int max_connection=10, bool debug=true) : 
+        port(port), listener(0), backlog(max_connection), debug(debug){ 
         FD_ZERO(&all_fds);
         FD_ZERO(&available);
     }
@@ -31,10 +31,8 @@ public:
         // create server listener socket
         listener = create_socket(port);
         max_fd = listener + 1;
-
         // append listener fd to all_fds set
         FD_SET(listener, &all_fds);
-
         // server loop
         while(1){
             // use select() to find available fds
@@ -56,13 +54,14 @@ public:
                 clients.insert(new_client);
                 // allocate new buffer
                 r_buf[new_client] = stringstream();
-                handle_new_connection(new_client);
+                new_connection_handler(*this, new_client);
             }
             // handle existing connection
             if(debug)printf("handle existing connection\n");
             for(auto& client: clients){
                 if(FD_ISSET(client, &available)){
                     // read input
+                    memset(buffer, 0, sizeof(buffer));
                     int n = read(client, buffer, BUFFER_SIZE);
                     // clear read buffer
                     r_buf[client].str(buffer);
@@ -71,7 +70,7 @@ public:
                     // disconnection
                     if(n <= 0){
                         if(debug)printf("handle disconnection %d\n", client);
-                        handle_disconnect(client);
+                        disconnection_handler(*this, client);
                         // remove client from set, remove r/w buffer
                         clients.erase(client);
                         r_buf.erase(client);
@@ -81,7 +80,7 @@ public:
                     }
                     else{
                         if(debug)printf("handle client %d\n", client);
-                        handle_client(client);
+                        client_handler(*this, client);
                     }
                 }
             }
@@ -89,6 +88,23 @@ public:
         }
         // close server
         close(listener);
+    }
+    void registerClientHandler(function<void(Server&, int)> f){client_handler = f;}
+    void registerNewConnectionHandler(function<void(Server&, int)> f){new_connection_handler = f;}
+    void registerDisconnectionHandler(function<void(Server&, int)> f){disconnection_handler = f;}
+    void forEachClient(function<void(Server&, int)> callback, int exclude = 0){
+        for(auto& client : clients)
+            if(client != exclude)
+                callback(*this, client);
+    } 
+    void send(int client, string message){
+        write(client, message.c_str(), message.length());
+    }
+    string getClientInput(int client){
+        return r_buf[client].str();
+    }
+    void disconnect(int client){
+        disconnection_handler(*this, client);
     }
 protected:
     // max connection 
@@ -100,6 +116,9 @@ protected:
     set<int> clients;
     char buffer[BUFFER_SIZE];
     map<int, stringstream> r_buf;
+    function<void(Server&, int)> client_handler;
+    function<void(Server&, int)> new_connection_handler;
+    function<void(Server&, int)> disconnection_handler;
 
     int create_socket(int port){
         int sock;
@@ -147,9 +166,6 @@ protected:
             perror("Error: establish new connection failed.");
         return new_client;
     }
-    virtual void handle_client(int){} 
-    virtual void handle_new_connection(int){}
-    virtual void handle_disconnect(int){};
 };
 
 #endif
