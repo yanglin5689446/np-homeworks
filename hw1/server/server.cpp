@@ -148,8 +148,12 @@ void handleDisconnection(Server& server, int client){
     fd_name_map.erase(client);
 }
 
-int main() {
-    Server server(SERVER_PORT, 10, true);
+int main(int argc, char **argv) {
+    if(argc != 2){
+        cout << "Usage: server [port]" << endl;
+        exit(1);
+    }
+    Server server(stoi(argv[1]), 10, true);
     server.registerNewConnectionHandler(handleNewConnection);
     server.registerDisconnectionHandler(handleDisconnection);
     server.registerClientHandler(handleClient);
