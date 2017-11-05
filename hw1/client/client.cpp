@@ -1,5 +1,6 @@
 #include <string.h>
 #include <iostream>
+#include <netdb.h>
 #include "client.hpp"
 using namespace std;
 
@@ -29,7 +30,13 @@ int main(int argc, char** argv){
     int port;
     if(argc == 2)port = stoi(argv[1]);
     if(argc == 3){
-        remote_host = argv[1];
+        string in = argv[1];
+        hostent *he = gethostbyname(in.c_str());
+        if(he){
+            in_addr **addr_list = (in_addr**)he->h_addr_list;
+            remote_host = inet_ntoa(*addr_list[0]);
+        }
+        else remote_host = in;
         port = stoi(argv[2]);
     }
 
