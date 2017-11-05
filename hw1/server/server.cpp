@@ -153,7 +153,7 @@ int main(int argc, char **argv) {
         cout << "Usage: server [port]" << endl;
         exit(1);
     }
-    Server server(stoi(argv[1]), 10, true);
+    Server server(stoi(argv[1]), 20, true);
     server.registerNewConnectionHandler(handleNewConnection);
     server.registerDisconnectionHandler(handleDisconnection);
     server.registerClientHandler(handleClient);

@@ -17,7 +17,7 @@
 #include <fcntl.h>
 using namespace std;
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 2048
 
 namespace select_server{
     class Server{

@@ -22,12 +22,16 @@ void handleClientInput(Client& client, const string& input){
 
 int main(int argc, char** argv){
     if(argc == 1 || argc > 3){
-        cout << "Usage: client [port] [host(default localhost)]" << endl;
+        cout << "Usage: client [host(default localhost)] [port]" << endl;
         exit(1);
     }
     string remote_host;
-    int port = stoi(argv[1]);
-    if(argc == 3)remote_host = argv[2];
+    int port;
+    if(argc == 2)port = stoi(argv[1]);
+    if(argc == 3){
+        remote_host = argv[1];
+        port = stoi(argv[2]);
+    }
 
     Client client(remote_host, port);
     client.registerServerResponseHandler(handleServerResponse);
