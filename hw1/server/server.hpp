@@ -73,13 +73,7 @@ namespace select_server{
                         // disconnection
                         if(n <= 0){
                             if(debug)printf("handle disconnection %d\n", client);
-                            disconnection_handler(*this, client);
-                            // remove client from set, remove r/w buffer
-                            clients.erase(client);
-                            r_buf.erase(client);
-                            FD_CLR(client, &all_fds);
-                            FD_CLR(client, &available);
-                            close(client);
+                            disconnect(client);
                         }
                         else{
                             if(debug)printf("handle client %d\n", client);
@@ -108,6 +102,12 @@ namespace select_server{
         }
         void disconnect(int client){
             disconnection_handler(*this, client);
+            // remove client from set, remove r/w buffer
+            clients.erase(client);
+            r_buf.erase(client);
+            FD_CLR(client, &all_fds);
+            FD_CLR(client, &available);
+            close(client);
         }
     protected:
         // max connection 
@@ -223,11 +223,7 @@ namespace epoll_server {
                         r_buf[client].clear();
                         if(n <= 0){
                             // close client, remove client from monitor queue
-                            disconnection_handler(*this, client);
-                            clients.erase(client);
-                            r_buf.erase(client);
-                            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client, NULL);
-                            close(client);
+                            disconnect(client);
                         }
                         else{
                             client_handler(*this, client);
@@ -255,6 +251,10 @@ namespace epoll_server {
         }
         void disconnect(int client){
             disconnection_handler(*this, client);
+            clients.erase(client);
+            r_buf.erase(client);
+            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client, NULL);
+            close(client);
         }
     protected:
         // max connection 

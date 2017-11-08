@@ -76,6 +76,7 @@ void handleClient(Server& server, int client){
     // for change name function
     switch(status){
         case EXIT:
+            cout << "exit" << endl;
             server.disconnect(client);
             break;
         case WHO:
