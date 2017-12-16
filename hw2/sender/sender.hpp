@@ -126,10 +126,6 @@ public:
     SetsockoptSender() = default;
     SetsockoptSender(std::string addr, int port, string filename, int ms = 50) : Sender(addr, port, filename, ms){
         setsockopt(sender_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        // Set Alarm
-        signal(SIGALRM, [](int signo){ alarm(1); return; });
-        siginterrupt(SIGALRM, 1);
-        alarm(1);
     }
     ~SetsockoptSender() {};
 private:
@@ -171,7 +167,10 @@ class AlarmSender : public Sender {
 public: 
     AlarmSender() = default;
     AlarmSender(std::string addr, int port, string filename, int ms = 50) : Sender(addr, port, filename, ms){
-        setsockopt(sender_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        // Set Alarm
+        signal(SIGALRM, [](int signo){ alarm(1); return; });
+        siginterrupt(SIGALRM, 1);
+        alarm(1);
     }
     ~AlarmSender() {};
 private:

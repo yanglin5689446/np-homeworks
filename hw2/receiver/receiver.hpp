@@ -21,7 +21,6 @@ using namespace std;
 
 #define BUFFER_SIZE 2048
 
-namespace Select{
 class Receiver{
 public:
     bool debug;
@@ -42,6 +41,7 @@ public:
             if(header.offset == -1)file.open(buffer + sizeof(header), ofstream::out | ofstream::binary);
             else{
                 const char *data = buffer + sizeof(header);
+                if(debug)cout << data << endl;
                 file << data << flush; 
                 if(header.fin)file.close();
             }
@@ -108,6 +108,5 @@ protected:
         return sock; 
     }
 };
-}
 
 #endif
