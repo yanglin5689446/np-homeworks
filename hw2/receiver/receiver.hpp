@@ -34,12 +34,13 @@ public:
         bind_fd = create_socket(port);
         ofstream file;
         Header header;
-        int syn = 0;
+        int syn = 1;
         // receiver loop
         while(1){
             receive_packet(bind_fd);
             memcpy(&header, buffer, sizeof(header));
             if(syn == header.syn){
+                send_ack(bind_fd, syn);
                 if(header.offset == -1)file.open(buffer + sizeof(header), ofstream::out | ofstream::binary);
                 else{
                     const char *data = buffer + sizeof(header);
@@ -48,12 +49,10 @@ public:
                     if(header.fin){
                         file.close();
                         syn = 0;
-                        continue;
                     }
                 }
-                syn ++;
                 // tell sender we received data
-                send_ack(bind_fd);
+                syn ++;
             }
         }
         // close receiver
@@ -77,9 +76,9 @@ protected:
         // trailing '\0'
         buffer[n] = 0;
     }
-    void send_ack(int bind_fd){
+    void send_ack(int bind_fd, int syn){
         socklen_t cli_len = sizeof(addr_peer);
-        sendto(bind_fd, buffer, sizeof(buffer), 0, (sockaddr*)&addr_peer, cli_len);
+        sendto(bind_fd, &syn, sizeof(int), 0, (sockaddr*)&addr_peer, cli_len);
     }
 
     int create_socket(int port){

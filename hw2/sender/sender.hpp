@@ -48,7 +48,7 @@ public:
                 int offset
                 int data_size
         */
-        int syn = 0
+        int syn = 1;
         Packet fname_packet(filename.c_str(), (Header){0, syn++, -1, (int)filename.length()});
         while(!send_packet(fname_packet));
 
@@ -93,10 +93,9 @@ private:
         // temp timeval variable in case that select() override original one
         static timeval ttv;
 
-        cout << "sending datagram: offset = "  << packet.header.offset << 
+        cout << "sending datagram: offset = "  << packet.header.offset << ", syn = " << packet.header.syn  <<
                 ", size = " << packet.header.data_size << "..." << flush;
         write(sender_fd, packet.buffer, packet.size());
-        
         ttv = tv;
         FD_SET(sender_fd, &available);
         int nready = select(sender_fd + 1, &available, NULL, NULL, &ttv);
@@ -115,8 +114,17 @@ private:
                 connecting = false;
                 return true;
             }
-            cout << "succeed!" << endl;
-            return true;
+            int syn;
+            memcpy(&syn, &buffer , sizeof(int));
+            cout << "syn = " << syn << endl;
+            if(syn == packet.header.syn){
+                cout << "succeed!" << endl;
+                return true;
+            }
+            else {
+                cout << "failed" << endl;
+                return false;
+            }
         }
     }
     fd_set available;
@@ -134,7 +142,7 @@ private:
         // temp timeval variable in case that select() override original one
         static timeval ttv;
 
-        cout << "sending datagram: offset = "  << packet.header.offset << 
+        cout << "sending datagram: offset = "  << packet.header.offset << ", syn = " << packet.header.syn  <<
                 ", size = " << packet.header.data_size << "..." << flush;
         write(sender_fd, packet.buffer, packet.size());
 
