@@ -48,14 +48,15 @@ public:
                 int offset
                 int data_size
         */
-        Packet fname_packet(filename.c_str(), (Header){0, -1, (int)filename.length()});
+        int syn = 0
+        Packet fname_packet(filename.c_str(), (Header){0, syn++, -1, (int)filename.length()});
         while(!send_packet(fname_packet));
 
         while(connecting){
             int offset = file.tellg(); 
             file.read(buffer, MAX_DATA_SIZE);
             int nbytes = file.gcount();
-            Packet packet(buffer, (Header){file.eof(), offset, nbytes });
+            Packet packet(buffer, (Header){file.eof(), syn++, offset, nbytes });
             
             // if finished, end connection
             connecting = !packet.header.fin;

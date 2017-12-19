@@ -12,10 +12,12 @@
 #include <netinet/in.h>  
 #include <iostream>
 #include <string>
+#include <fstream>
 #include <functional>
+#include <sstream>
 using namespace std;
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 16384
 
 class Client{
 public:
@@ -53,7 +55,7 @@ public:
             if(FD_ISSET(STDIN_FILENO, &available)){
                 memset(buffer, 0, sizeof(buffer));
                 int n = read(STDIN_FILENO, buffer, sizeof(buffer)); 
-                if(n < 0){
+                if(n <= 0){
                     perror("read from stdin failed.\n");
                     exit(1);
                 }
@@ -79,6 +81,16 @@ public:
     }
     void writeToServer(string s){
         write(server, s.c_str(), s.length());
+    }
+    void writeFile(string file_name){
+        // open file and send 
+        fstream file(file_name, fstream::in | fstream::binary);
+        while(file){
+            file.getline(buffer, BUFFER_SIZE);
+            string packet = file_name + " " + buffer;
+            write(server, packet.c_str(), packet.length());
+        }
+        file.close();
     }
 
 protected:
