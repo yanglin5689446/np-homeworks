@@ -15,23 +15,15 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include "../general.hpp"
 using namespace std;
-
-#define BUFFER_SIZE 16384
-
-enum: int{
-    INITIAL,
-    IDLE,
-    SLEEPING,
-    UPLOADING,
-};
 
 class Server{
 public:
     bool debug;
     // callbacks
     ~Server() = default;
-    Server(const int port, const int max_connection=10, bool debug=true) : 
+    Server(const int port, const int max_connection=10, bool debug=false) : 
         port(port), listener(0), backlog(max_connection), debug(debug){ 
         events = new epoll_event[max_connection];
     }
@@ -41,7 +33,7 @@ public:
         setup_epoll();
         // server loop
         while(1){
-            // use select() to find available fds
+            // use epoll to find available fds
             int nfds = epoll_wait(epoll_fd, events, backlog, -1);
             if(nfds < 0){
                 perror("error on listening events.\n");
@@ -57,20 +49,19 @@ public:
                     clients.insert(new_client);
                     set_nonblocking(new_client);
                     // add new client fd to monitor queue
+                    epoll_event event;
                     event.events = EPOLLIN;
                     event.data.fd = new_client;
-                    if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_client, &event) < 0){
+                    if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_client, &event) < 0)
                         perror("error on adding user to epoll monitor queue.\n");
-                    }
                 }
                 else{
                     int client = events[i].data.fd;
                     if(events[i].events & EPOLLIN){
-                        int n = read_client(client);
-                        if(n == 0) disconnect(client);
-                        else handle_client(client, n);
+                        if(receiving.count(client))receive_file(client);
+                        else handle_client(client);
                     }
-                    //else if(events[i].events & EPOLLOUT)
+                    else if(events[i].events & EPOLLOUT)send_file(client);
                 }
             }
         }
@@ -78,77 +69,90 @@ public:
         close(listener);
         close(epoll_fd);
     }
-    void handle_client(int client, int bytes_read){
-        // split input to tokens
-        cout << bytes_read << endl;
-        if(status_map[client] == INITIAL){
+    void sync_new_connection(int fd, string& client_name){
+        for(auto& file_name: client_files[client_name]){
+            string get_file = string("/put ") + file_name + ' ' + to_string(get_file_size(file_name)) + ' ' + client_name;
+            non_block_write(fd, get_file.c_str(), get_file.length());
+        }
+    }
+    void sync_peers(string& client_name, string& file_name){
+        string get_file = string("/put ") + file_name + ' ' + to_string(get_file_size(file_name)) + ' ' + client_name;
+        for(auto& peer: name_clients_map[client_name])
+            non_block_write(peer, get_file.c_str(), get_file.length());
+    }
+    void handle_client(int client){
+        // handle command fd
+        int bytes_read = non_block_read(client, read_buffer);
+        if(bytes_read == 0) {
+            disconnect(client);
+            return;
+        }
+        // tokenize
+        vector<string> tokens;
+        string token;
+        stringstream tokenizer(read_buffer);
+        while(tokenizer >> token)tokens.push_back(token);
+        // command
+        if(tokens[0] == "/exit") disconnect(client);
+        else if(tokens[0] == "/put" && tokens.size() == 4){
+            receiving[client] = FileInfo(tokens[1], stoi(tokens[2]), FileInfo::out);
+            fd_file_map[client] = tokens[3];
+            client_files[tokens[3]].insert(tokens[1]);
+        }
+        else if(tokens[0] == "/name" && tokens.size() == 2){
             string input = read_buffer;
             name_map[client] = input;
             // add client to same name clients set
-            if(!name_clients_map.count(input))name_clients_map[input] = set<int>();
-            name_clients_map[input].insert(client);
-            
-            status_map[client] = IDLE;
-            send_client(client, string("Welcome to the dropbox-like server! : ") + name_map[client] + '\n');
+            if(!name_clients_map.count(tokens[1]))name_clients_map[tokens[1]] = set<int>();
+            name_clients_map[tokens[1]].insert(client);
+            string response = string("Welcome to the dropbox-like server! : ") + name_map[client] + '\n';
+            non_block_write(client, response.c_str(), response.length());
+            sync_new_connection(client, tokens[1]);
         }
-        else if(status_map[client] == IDLE){
-            // tokenize
-            vector<string> tokens;
-            string response;
-            string token;
-            stringstream tokenizer(read_buffer);
-            while(tokenizer >> token)tokens.push_back(token);
-
-            if(tokens[0] == "/exit") disconnect(client);
-            else if(tokens[0] == "/put" && tokens.size() == 3){
-                status_map[client] = UPLOADING;
-                file_map[tokens[1]] = fstream(tokens[1], fstream::out | fstream::binary);
-                progress[tokens[1]] = make_pair(0, stoi(tokens[2]));
-                memcpy(write_buffer, read_buffer, bytes_read);
-                for(auto& peer: name_clients_map[name_map[client]]){
-                    if(status_map[peer] != SLEEPING && peer != client){
-                        // TODO: slowdown I/O speed
-                    }
-                }
-            }
-        }
-        else if(status_map[client] == UPLOADING){
-            for(auto& peer: name_clients_map[name_map[client]]){
-                if(status_map[peer] != SLEEPING && peer != client){
-                    // TODO: slowdown I/O speed
-                }
-            }
-
-            stringstream tokenizer(read_buffer);
-            string file_name;
-            tokenizer >> file_name;
-            
-            file_map[file_name].write(read_buffer + file_name.length() + 1, bytes_read - file_name.length() - 1);
-            progress[file_name].first += bytes_read - file_name.length() - 1;
-            cout << "progress: " << 100.0 * progress[file_name].first/progress[file_name].second << '%' << flush << endl;
-            if(progress[file_name].first == progress[file_name].second){
-                file_map[file_name].close();
-                status_map[client] = IDLE;
-            }
+        else if(tokens[0] == "/get" && tokens.size() == 2){
+            sending[client] = FileInfo(tokens[1], get_file_size(tokens[1]), FileInfo::in);
+            // change client to write event;
+            epoll_event event;
+            event.events = EPOLLOUT;
+            event.data.fd = client;
+            if(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, client, &event) < 0)
+                perror("error on adding user to epoll monitor queue.\n");
         }
     }
-    void disconnection(int client){
-        name_clients_map[name_map[client]].erase(client);
-        name_map.erase(client);
-        status_map[client] = INITIAL;
+    void receive_file(int fd){
+        int data_size = non_block_read(fd, read_buffer);
+        receiving[fd].file.write(read_buffer, data_size);
+        receiving[fd].current += data_size;
+        if(receiving[fd].done() || !data_size){
+            if(!data_size)perror("error while receiving file: client may end the connection.\n");
+            if(receiving[fd].done())sync_peers(fd_file_map[fd], receiving[fd].file_name);
+            receiving[fd].file.close();
+            receiving.erase(fd);
+            clients.erase(fd);
+            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+            close(fd);
+        }
     }
-    void send_client(int client, string message){
-        write(client, message.c_str(), message.length());
-    }
-    int read_client(int client){
-        memset(read_buffer, 0, sizeof(read_buffer));
-        int n = 0, nread = 0;
-        while((nread = read(client, read_buffer + n, BUFFER_SIZE - n - 1)) > 0 )n += nread;
-        return n;
+    void send_file(int fd){
+        if(!sending[fd].file.eof()){
+            memset(write_buffer, 0, sizeof(write_buffer));
+            sending[fd].file.read(write_buffer, BUFFER_SIZE - 1);
+            int data_size = sending[fd].file.gcount();
+            non_block_write(fd, write_buffer, data_size);
+        }
+        else {
+            sending[fd].file.close();
+            sending.erase(fd);
+            clients.erase(fd);
+            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+            close(fd);
+        }
     }
     void disconnect(int client){
-        disconnection(client);
-        cout << name_map[client] << " exit." << endl;
+        if(name_map.count(client)){
+            name_clients_map[name_map[client]].erase(client);
+            name_map.erase(client);
+        }
         clients.erase(client);
         epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client, NULL);
         close(client);
@@ -158,16 +162,19 @@ protected:
     const int backlog; 
     const int port;
     int listener, epoll_fd;
-    epoll_event event;
     epoll_event* events;
     set<int> clients;
     char read_buffer[BUFFER_SIZE];
     char write_buffer[BUFFER_SIZE];
+    // fd to name map
     map<int, string> name_map;
-    map<int, int> status_map;
-    map<string, fstream> file_map;
+    // client with same name map
     map<string, set<int>> name_clients_map;
-    map<string, pair<int, int>> progress;
+    map<string, set<string>> client_files;
+    // client sending which file
+    map<int, FileInfo> sending;
+    map<int, FileInfo> receiving;
+    map<int, string> fd_file_map;
 
     int create_socket(int port){
         int sock;
@@ -224,26 +231,13 @@ protected:
             exit(1);
         }
         // monitor epoll_fd event;
+        epoll_event event;
         event.events = EPOLLIN;
         event.data.fd = listener;
         if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, listener, &event) < 0){
             perror("error on registering epoll monitor event,\n");
             exit(1);
         }
-    }
-    bool set_nonblocking(int &sock){
-        int opts;
-        opts = fcntl(sock, F_GETFL);
-        if(opts < 0){
-            perror("error on getting sock staus.\n");
-            return false;
-        }
-        opts |= O_NONBLOCK;
-        if(fcntl(sock, F_SETFL, opts) < 0){
-            perror("error on setting sock non-blocking.\n");
-            return false;
-        }
-        return true;
     }
 };
 

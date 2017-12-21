@@ -4,6 +4,7 @@
 #include <netdb.h>
 #include <regex>
 #include <map>
+#include <set>
 #include <stdio.h>  
 #include <stdlib.h>
 #include <unistd.h>  
@@ -13,12 +14,13 @@
 #include <netinet/in.h>  
 #include <fstream>
 #include <functional>
+#include <algorithm>
 #include <sstream>
+#include "../general.hpp"
 using namespace std;
 
-#define BUFFER_SIZE 16384
-
 string client_name;
+
 
 class Client{
 public:
@@ -28,39 +30,30 @@ public:
         server_addr.sin_port = htons(port);  
         // command fd
         fd_cmd = socket(AF_INET, SOCK_STREAM, 0);  
-        // upload fd
-        fd_upload = socket(AF_INET, SOCK_STREAM, 0);  
-        FD_ZERO(&available);
+        FD_ZERO(&read_set);
     }
-    void write_file(string file_name){
-        // open file and send 
-        char write_buffer[BUFFER_SIZE];
-        fstream file(file_name, fstream::in | fstream::binary);
-        while(!file.eof()){
-            memset(write_buffer, 0, sizeof(write_buffer));
-            memcpy(write_buffer, file_name.c_str(), file_name.length()); 
-            write_buffer[file_name.length()] = ' ';
-            file.read(write_buffer + file_name.length() + 1, BUFFER_SIZE - (file_name.length() + 1) - 1);
-            int data_size = file_name.length() + 1 + file.gcount();
-            non_block_write(fd_cmd, write_buffer, data_size);
-            cout << data_size << endl;
-        }
-        file.close();
-    }
+
     void establish_connection(){
         connect(fd_cmd, (struct sockaddr *)&server_addr, sizeof(server_addr));  
         connecting = true;
-        non_block_write(fd_cmd, client_name.c_str(), client_name.length()); 
+        // send client name to server
+        string set_name = "/name " + client_name;
+        non_block_write(fd_cmd, set_name.c_str(), set_name.length()); 
+        max_fd = fd_cmd;
+
         while(connecting){
             // add server and stdin to fd set
-            FD_SET(fd_cmd, &available);
-            FD_SET(STDIN_FILENO, &available);
-            if(select(fd_cmd + 1, &available, NULL, NULL, NULL) < 0){
+            FD_SET(fd_cmd, &read_set);
+            for(auto& fd: downloading_fds)FD_SET(fd, &read_set);
+            for(auto& fd: uploading_fds)FD_SET(fd, &write_set);
+            FD_SET(STDIN_FILENO, &read_set);
+
+            if(select(max_fd + 1, &read_set, &write_set, NULL, NULL) < 0){
                 perror("select error.\n");
                 exit(1);
             }
             // handling server fd
-            if(FD_ISSET(fd_cmd, &available)){
+            if(FD_ISSET(fd_cmd, &read_set)){
                 memset(buffer, 0, sizeof(buffer));
                 int n = read(fd_cmd, buffer, BUFFER_SIZE);
                 if(n < 0){
@@ -70,7 +63,7 @@ public:
                 server_response(n);
             }
             // handling server stdin 
-            if(FD_ISSET(STDIN_FILENO, &available)){
+            if(FD_ISSET(STDIN_FILENO, &read_set)){
                 memset(buffer, 0, sizeof(buffer));
                 int n = read(STDIN_FILENO, buffer, sizeof(buffer)); 
                 if(n <= 0){
@@ -79,10 +72,75 @@ public:
                 }
                 input = buffer;
                 if(input.length() > 1)input.pop_back();
-                client_input(input);
+                handle_input(input);
             }
+            // handle download fds
+            for(auto& fd :downloading_fds)
+                if(FD_ISSET(fd, &read_set))download_file(fd);
+            // handle upload fd
+            for(auto& fd : uploading_fds)
+                if(FD_ISSET(fd, &write_set))upload_file(fd);
+
+            FD_ZERO(&read_set);
+            FD_ZERO(&write_set);
         }
         close(fd_cmd);  
+    }
+
+    void download_file(int fd){
+        int data_size = non_block_read(fd, buffer);
+        downloading[fd].file.write(buffer, data_size);
+        downloading[fd].current += data_size;
+        int progress = 100*downloading[fd].current / downloading[fd].size;
+        cout << "Downloading file : " << downloading[fd].file_name << endl;
+        cout << "Progress : [";
+        for(int i = 0 ;i < 20 ; i++)
+            cout << ((progress >= i * 5) ? '#' : ' ');
+        cout <<"]" << endl;
+        if(downloading[fd].done() || !data_size){
+            if(!data_size)perror("error while receiving file: the server may end the connection");
+            if(downloading[fd].done())cout << "Download " << downloading[fd].file_name << " complete!" << endl;
+            downloading[fd].file.close();
+            downloading.erase(fd);
+            downloading_fds.erase(fd);
+            close(fd);
+        }
+    }
+    void upload_file(int fd){
+        static char write_buffer[BUFFER_SIZE];
+        if(!uploading[fd].file.eof()){
+            memset(write_buffer, 0, sizeof(write_buffer));
+            uploading[fd].file.read(write_buffer, BUFFER_SIZE - 1);
+            int data_size = uploading[fd].file.gcount();
+            uploading[fd].current += data_size;
+            int progress = 100*uploading[fd].current / uploading[fd].size;
+            cout << "Uploading file : " + uploading[fd].file_name << endl;
+            cout << "Progress : [";
+            for(int i = 0 ;i < 20 ; i++)
+                cout << ((progress >= i * 5) ? '#' : ' ');
+            cout <<"]" << endl;
+            non_block_write(fd, write_buffer, data_size);
+        }
+        else {
+            if(uploading[fd].done())cout << "Upload " << uploading[fd].file_name << " complete!" << endl;
+            uploading[fd].file.close();
+            uploading.erase(fd);
+            uploading_fds.erase(fd);
+            write(fd, write_buffer, 0);
+            close(fd);
+        }
+    }
+
+    int new_connection(){
+        int fd = socket(AF_INET, SOCK_STREAM, 0);  
+        connect(fd, (struct sockaddr *)&server_addr, sizeof(server_addr));  
+        if(fd < 0){
+            perror("fail to create new connection");
+            exit(1);
+        }
+        if(fd > max_fd)max_fd = fd;
+        set_nonblocking(fd);
+        return fd;
     }
 
     void server_response(int buffer_size){ 
@@ -95,20 +153,24 @@ public:
         ss >> token;
         if(token == "Welcome")cout << buffer << flush;
         else if(token == "/put"){
-            ss >> token;
-            file_map[token] = fstream(token, fstream::out | fstream::binary);
+            string file_name;
             int size;
-            ss >> size;
-            progress[token] = make_pair(0, size);
-        }
-        else {
-            int data_size = buffer_size - token.length() - 1;
-            file_map[token].write(buffer + token.length() + 1, data_size);
-            progress[token].first += data_size;
-            if(progress[token].first == progress[token].second)file_map[token].close();
+            ss >> file_name >> size;
+            // get file command
+            // if no file present in current local_file, download files
+            if(local_files.find(file_name) == local_files.end()){
+                local_files.insert(file_name);
+                // new donwload connection
+                int fd = new_connection();
+                downloading_fds.insert(fd);
+                downloading[fd] = FileInfo(file_name, size, FileInfo::out);
+                string get_file = string("/get ") + file_name;
+                non_block_write(fd, get_file.c_str(), get_file.length());
+            }
         }
     }
-    void client_input(const string& input){ 
+
+    void handle_input(const string& input){ 
         stringstream ss(input);
         string in;
         while(getline(ss, in)){
@@ -118,14 +180,18 @@ public:
             while(tokenizer >> token)tokens.push_back(token);
             if(tokens.empty())return; // empty input error
             if(tokens[0] == "/put" && tokens.size() == 2){
-                ifstream file(tokens[1], ifstream::binary | ifstream::ate);
-                if(!file)return; // open file error
-                int n = file.tellg();
-                file.close();
-                in = in + ' ' + to_string(n);
-                //connect(fd_upload, (struct sockaddr *)&server_addr, sizeof(server_addr));  
-                non_block_write(fd_cmd, in.c_str(), in.length());
-                write_file(tokens[1]);
+                // send fomat: /put file_name who file_size
+                int size = get_file_size(tokens[1]);
+                if(size < 0 )return;
+                string put_file = in + ' ' + to_string(size) + ' ' + client_name;
+                // new upload connection
+                int fd = new_connection();
+                uploading_fds.insert(fd);
+                uploading[fd] = FileInfo(tokens[1], size, FileInfo::in);
+                non_block_write(fd, put_file.c_str(), put_file.length());
+                local_files.insert(tokens[1]);
+                // worksround
+                usleep(100);
             }
             else if(tokens[0] == "/sleep" && tokens.size() == 2){
                 int s;
@@ -147,27 +213,20 @@ public:
     void end_connection(){
         connecting = false;
     }
-    void non_block_write(int fd, const char* msg, int size){
-        int n = 0;
-        int nwrite;
-        while(n < size){
-            nwrite = write(fd, msg + n, size - n);
-            if(nwrite < 0 && errno == EAGAIN)break;
-            n += nwrite;
-        }
-    }
-
 	int fd_cmd;  
-    int fd_upload;
-    int connecting;
+    int max_fd;
+    bool connecting;
     sockaddr_in server_addr;
-    map<string, pair<int, int>> progress;
-    map<string, fstream> file_map;
+    map<int, FileInfo> uploading;
+    map<int, FileInfo> downloading;
+    set<int> downloading_fds;
+    set<int> uploading_fds;
+    set<string> local_files;
     char buffer[BUFFER_SIZE];
     std::string message;
     std::string input;
     std::string name;
-    fd_set available;
+    fd_set read_set, write_set;
 };
 
 
