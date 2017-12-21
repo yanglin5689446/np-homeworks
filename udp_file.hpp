@@ -13,6 +13,7 @@
 
 struct Header{
     bool fin;
+    int syn;
     int offset;
     int data_size;
 };
