@@ -1,9 +1,9 @@
 
 all:
-	g++ server/server.cpp -o server --std=c++14
-	g++ client/client.cpp -o client --std=c++14
+	g++ server.cpp -o server
+	g++ client.cpp -o client
 
 .PHONY: clean
 
-clean: server client
+clean: client server 
 	rm -rf $^

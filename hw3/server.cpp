@@ -15,7 +15,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include "../general.hpp"
+#include "general.hpp"
 using namespace std;
 
 class Server{
@@ -87,6 +87,7 @@ public:
             disconnect(client);
             return;
         }
+        cout << "client " << client << ": " << read_buffer << endl;
         // tokenize
         vector<string> tokens;
         string token;
@@ -100,8 +101,7 @@ public:
             client_files[tokens[3]].insert(tokens[1]);
         }
         else if(tokens[0] == "/name" && tokens.size() == 2){
-            string input = read_buffer;
-            name_map[client] = input;
+            name_map[client] = tokens[1];
             // add client to same name clients set
             if(!name_clients_map.count(tokens[1]))name_clients_map[tokens[1]] = set<int>();
             name_clients_map[tokens[1]].insert(client);

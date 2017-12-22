@@ -16,7 +16,7 @@
 #include <functional>
 #include <algorithm>
 #include <sstream>
-#include "../general.hpp"
+#include "general.hpp"
 using namespace std;
 
 string client_name;
@@ -29,8 +29,9 @@ public:
         inet_pton(AF_INET, addr.c_str(), &server_addr.sin_addr);
         server_addr.sin_port = htons(port);  
         // command fd
-        fd_cmd = socket(AF_INET, SOCK_STREAM, 0);  
+        fd_cmd = new_connection(); 
         FD_ZERO(&read_set);
+        FD_ZERO(&write_set);
     }
 
     void establish_connection(){
@@ -52,21 +53,21 @@ public:
                 perror("select error.\n");
                 exit(1);
             }
-            // handling server fd
+            // handling client fd
             if(FD_ISSET(fd_cmd, &read_set)){
                 memset(buffer, 0, sizeof(buffer));
-                int n = read(fd_cmd, buffer, BUFFER_SIZE);
+                int n = non_block_read(fd_cmd, buffer, BUFFER_SIZE);
                 if(n < 0){
                     perror("read server message error.\n");
                     exit(1);
                 }
                 server_response(n);
             }
-            // handling server stdin 
+            // handling client stdin 
             if(FD_ISSET(STDIN_FILENO, &read_set)){
                 memset(buffer, 0, sizeof(buffer));
                 int n = read(STDIN_FILENO, buffer, sizeof(buffer)); 
-                if(n <= 0){
+                if(n < 0){
                     perror("read from stdin failed.\n");
                     exit(1);
                 }
@@ -188,9 +189,9 @@ public:
                 int fd = new_connection();
                 uploading_fds.insert(fd);
                 uploading[fd] = FileInfo(tokens[1], size, FileInfo::in);
-                non_block_write(fd, put_file.c_str(), put_file.length());
                 local_files.insert(tokens[1]);
-                // worksround
+                non_block_write(fd, put_file.c_str(), put_file.length());
+                // workaound
                 usleep(100);
             }
             else if(tokens[0] == "/sleep" && tokens.size() == 2){
