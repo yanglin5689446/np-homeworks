@@ -53,16 +53,6 @@ public:
                 perror("select error.\n");
                 exit(1);
             }
-            // handling client fd
-            if(FD_ISSET(fd_cmd, &read_set)){
-                memset(buffer, 0, sizeof(buffer));
-                int n = non_block_read(fd_cmd, buffer, BUFFER_SIZE);
-                if(n < 0){
-                    perror("read server message error.\n");
-                    exit(1);
-                }
-                server_response(n);
-            }
             // handling client stdin 
             if(FD_ISSET(STDIN_FILENO, &read_set)){
                 memset(buffer, 0, sizeof(buffer));
@@ -74,6 +64,16 @@ public:
                 input = buffer;
                 if(input.length() > 1)input.pop_back();
                 handle_input(input);
+            }
+            // handling client fd
+            if(FD_ISSET(fd_cmd, &read_set)){
+                memset(buffer, 0, sizeof(buffer));
+                int n = non_block_read(fd_cmd, buffer, BUFFER_SIZE);
+                if(n < 0){
+                    perror("read server message error.\n");
+                    exit(1);
+                }
+                server_response(n);
             }
             // handle download fds
             for(auto& fd :downloading_fds)
@@ -192,7 +192,7 @@ public:
                 local_files.insert(tokens[1]);
                 non_block_write(fd, put_file.c_str(), put_file.length());
                 // workaound
-                usleep(100);
+                usleep(50000);
             }
             else if(tokens[0] == "/sleep" && tokens.size() == 2){
                 int s;

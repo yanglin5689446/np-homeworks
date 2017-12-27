@@ -12,7 +12,7 @@ using namespace std;
 int get_file_size(string file_name){
     ifstream file(file_name, ifstream::binary | ifstream::ate);
     // open file error
-    if(!file)return -1; 
+    if(!file.is_open())return -1; 
     // get_file_size
     int size = file.tellg();
     file.close();

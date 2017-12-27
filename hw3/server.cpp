@@ -87,7 +87,6 @@ public:
             disconnect(client);
             return;
         }
-        cout << "client " << client << ": " << read_buffer << endl;
         // tokenize
         vector<string> tokens;
         string token;
@@ -95,10 +94,46 @@ public:
         while(tokenizer >> token)tokens.push_back(token);
         // command
         if(tokens[0] == "/exit") disconnect(client);
-        else if(tokens[0] == "/put" && tokens.size() == 4){
-            receiving[client] = FileInfo(tokens[1], stoi(tokens[2]), FileInfo::out);
+        else if(tokens[0] == "/put"){
             fd_file_map[client] = tokens[3];
-            client_files[tokens[3]].insert(tokens[1]);
+            set<string> &files = client_files[tokens[3]];
+            if(files.find(tokens[1]) == files.end()){
+                files.insert(tokens[1]);
+                receiving[client] = FileInfo(tokens[1], stoi(tokens[2]), FileInfo::out);
+            }
+            else {
+                int n = 1;
+                while(true){
+                    string new_file_name = tokens[1] + '(' + to_string(n) + ')';
+                    if(files.find(new_file_name) == files.end()){
+                        files.insert(new_file_name);
+                        receiving[client] = FileInfo(new_file_name, stoi(tokens[2]), FileInfo::out);
+                        break;
+                    }
+                    n++;    
+                }
+            }
+            if(tokens.size() > 4){
+                int from = 4 + tokens[1].length() + tokens[2].length() + tokens[3].length() + 4;
+                int data_size = bytes_read - from;
+                receiving[client].file.write(read_buffer + from, data_size);
+                receiving[client].current += data_size;
+                cout << receiving[client].current << ' ' << receiving[client].size << endl;
+                if(receiving[client].done() || !data_size){
+                    if(!data_size){
+                        fail_count[client] ++;
+                        if(fail_count[client] < 3)return;
+                        else fail_count[client] = 0;
+                        perror("error while receiving file: client may end the connection.\n");
+                    }
+                    receiving[client].file.close();
+                    if(receiving[client].done())sync_peers(fd_file_map[client], receiving[client].file_name);
+                    receiving.erase(client);
+                    clients.erase(client);
+                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client, NULL);
+                    close(client);
+                }
+            }
         }
         else if(tokens[0] == "/name" && tokens.size() == 2){
             name_map[client] = tokens[1];
@@ -123,10 +158,16 @@ public:
         int data_size = non_block_read(fd, read_buffer);
         receiving[fd].file.write(read_buffer, data_size);
         receiving[fd].current += data_size;
+        cout << receiving[fd].current << ' ' << receiving[fd].size << endl;
         if(receiving[fd].done() || !data_size){
-            if(!data_size)perror("error while receiving file: client may end the connection.\n");
-            if(receiving[fd].done())sync_peers(fd_file_map[fd], receiving[fd].file_name);
+            if(!data_size){
+                perror("error while receiving file: client may end the connection.\n");
+                fail_count[fd] ++;
+                if(fail_count[fd] < 3)return;
+                else fail_count[fd] = 0;
+            }
             receiving[fd].file.close();
+            if(receiving[fd].done())sync_peers(fd_file_map[fd], receiving[fd].file_name);
             receiving.erase(fd);
             clients.erase(fd);
             epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
@@ -166,6 +207,7 @@ protected:
     set<int> clients;
     char read_buffer[BUFFER_SIZE];
     char write_buffer[BUFFER_SIZE];
+    map<int, int> fail_count;
     // fd to name map
     map<int, string> name_map;
     // client with same name map
