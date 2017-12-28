@@ -34,26 +34,23 @@ public:
         bind_fd = create_socket(port);
         ofstream file;
         Header header;
-        int syn = 1;
+        int syn = -1;
         // receiver loop
         while(1){
             receive_packet(bind_fd);
             memcpy(&header, buffer, sizeof(header));
-            if(syn == header.syn){
-                send_ack(bind_fd, syn);
-                if(header.offset == -1)file.open(buffer + sizeof(header), ofstream::out | ofstream::binary);
-                else{
-                    const char *data = buffer + sizeof(header);
-                    if(debug)cout << data << endl;
-                    file << data << flush; 
-                    if(header.fin){
-                        file.close();
-                        syn = 0;
-                    }
-                }
-                // tell sender we received data
-                syn ++;
+            if(header.offset == -1){
+                file.open(buffer + sizeof(header), ofstream::out | ofstream::binary);
+                syn = -1;
             }
+            else if(header.syn != syn){
+                const char *data = buffer + sizeof(header);
+                file << data << flush; 
+                if(header.fin)file.close();
+            }
+            syn = header.syn;
+            
+            send_ack(bind_fd, syn);
         }
         // close receiver
         close(bind_fd);

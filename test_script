@@ -1,9 +1,0 @@
-#!/bin/bash
-
-for i in {1..100}
-do
-    printf $i
-    printf "\n" | ./test hw3 12345 | tail -n 1 >> log
-    rm -rf hw3/testfile* 
-done
-
