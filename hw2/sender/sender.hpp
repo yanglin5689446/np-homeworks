@@ -164,8 +164,17 @@ private:
                 connecting = false;
                 return true;
             }
-            cout << "succeed!" << endl;
-            return true;
+            int syn;
+            memcpy(&syn, &buffer , sizeof(int));
+            cout << "syn = " << syn << endl;
+            if(syn == packet.header.syn){
+                cout << "succeed!" << endl;
+                return true;
+            }
+            else {
+                cout << "failed" << endl;
+                return false;
+            }
         }
         
     }
@@ -209,8 +218,17 @@ private:
                 connecting = false;
                 return true;
             }
-            cout << "succeed!" << endl;
-            return true;
+            int syn;
+            memcpy(&syn, &buffer , sizeof(int));
+            cout << "syn = " << syn << endl;
+            if(syn == packet.header.syn){
+                cout << "succeed!" << endl;
+                return true;
+            }
+            else {
+                cout << "failed" << endl;
+                return false;
+            }
         }
         
     }

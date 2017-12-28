@@ -45,7 +45,7 @@ public:
             }
             else if(header.syn != syn){
                 const char *data = buffer + sizeof(header);
-                file << data << flush; 
+                file.write(data, header.data_size); 
                 if(header.fin)file.close();
             }
             syn = header.syn;
